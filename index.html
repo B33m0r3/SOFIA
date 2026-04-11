@@ -440,12 +440,12 @@ select.filter:focus{border-color:var(--teal)}
         <div class="chart-card" style="max-width:560px">
           <div class="card-title"><span>⚙️</span> Configurações do Sistema</div>
           <div style="font-family:var(--mono);font-size:12px;color:var(--text3);margin-bottom:20px">
-            Para alterar as fontes de dados, edite o arquivo <code style="color:var(--teal)">index.html</code> e atualize o objeto <code style="color:var(--teal)">SOFIA_CONFIG</code>.
+            Para alterar as fontes de dados, edite as URLs de conexão abaixo ou recarregue os dados.
           </div>
           <div style="background:var(--surface2);border-radius:8px;padding:16px;font-family:var(--mono);font-size:11px;color:var(--text2);line-height:1.8">
             <div style="color:var(--text3)">// URLs das planilhas conectadas</div>
-            <div><span style="color:var(--teal)">USUARIOS</span>: <span id="cfg-usuarios" style="color:var(--purple)">—</span></div>
-            <div><span style="color:var(--teal)">TRANSACOES</span>: <span id="cfg-transacoes" style="color:var(--purple)">—</span></div>
+            <div><span style="color:var(--teal)">USUARIOS</span>: <span id="cfg-usuarios" style="color:var(--purple);word-break:break-all;font-size:10px">—</span></div>
+            <div style="margin-top:8px"><span style="color:var(--teal)">TRANSACOES</span>: <span id="cfg-transacoes" style="color:var(--purple);word-break:break-all;font-size:10px">—</span></div>
             <div style="margin-top:8px;color:var(--text3)">// Usuário logado</div>
             <div><span style="color:var(--teal)">login</span>: <span id="cfg-login" style="color:var(--amber)">—</span></div>
             <div><span style="color:var(--teal)">perfil</span>: <span id="cfg-perfil" style="color:var(--amber)">—</span></div>
@@ -465,7 +465,7 @@ select.filter:focus{border-color:var(--teal)}
 
 <script>
 /* ══════════════════════════════════════════
-   SOFIA CONFIG — edite as URLs aqui
+   SOFIA CONFIG — URLS DAS PLANILHAS
 ══════════════════════════════════════════ */
 const SOFIA_CONFIG = {
   usuarios_url:   'https://docs.google.com/spreadsheets/d/e/2PACX-1vT93eHj81FFqjwS09dKX99jXjvI_OX7smypDcgSVTReYFEn2VT_ho-BI7rYpJGD9XWsHt4rFvnWvR12/pub?output=csv',
@@ -553,9 +553,9 @@ async function doLogin() {
     msg.textContent = '';
     await loadDashboard();
   } catch(e) {
-    msg.className='login-error'; msg.textContent='Erro de conexão. Verifique a planilha.';
+    msg.className='login-error'; msg.textContent='Erro de conexão com a planilha.';
     btn.disabled = false;
-    console.error(e);
+    console.error('Erro login:', e);
   }
 }
 
@@ -565,20 +565,37 @@ function doLogout() {
   document.getElementById('app').className='';
   document.getElementById('app').style.display='none';
   document.getElementById('login-screen').style.display='flex';
+  document.getElementById('inp-user').value='';
   document.getElementById('inp-pass').value='';
   document.getElementById('btn-login').disabled=false;
 }
 
 /* ══════════════════════════════════════════
-   LOAD DATA
+   LOAD DATA COM CORS BYPASS
 ══════════════════════════════════════════ */
+async function fetchCSV(url) {
+  try {
+    const corsProxy = 'https://cors-anywhere.herokuapp.com/';
+    const resp = await fetch(url + '&t=' + Date.now(), {
+      headers: {'Accept': 'text/csv'}
+    }).catch(err => {
+      console.log('Tentando proxy...');
+      return fetch(corsProxy + url + '&t=' + Date.now());
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    return await resp.text();
+  } catch(e) {
+    console.error('Fetch error:', e);
+    throw e;
+  }
+}
+
 async function loadDashboard() {
   document.getElementById('login-screen').style.display='none';
   document.getElementById('data-loading').style.display='flex';
   document.getElementById('loading-text').textContent = 'Buscando transações...';
   try {
-    const resp = await fetch(SOFIA_CONFIG.transacoes_url + (SOFIA_CONFIG.transacoes_url.includes('?')?'&':'?') + 't=' + Date.now());
-    const text = await resp.text();
+    const text = await fetchCSV(SOFIA_CONFIG.transacoes_url);
     const rows = parseCSV(text);
     ALL_DATA = rows
       .filter(r => {
@@ -588,7 +605,7 @@ async function loadDashboard() {
       .map(r => ({
         usuario:         r.usuario || r.login || '',
         data:            r.data || '',
-        descricao:       r.descricao || r.descricao || r.nome || r.description || '',
+        descricao:       r.descricao || r.nome || r.description || '',
         categoria:       r.categoria || r.category || 'Outros',
         cartao:          (r.cartao || r.card || '').toUpperCase(),
         de_quem:         (r.de_quem || r.dono || r.quem || 'GUILHERME').toUpperCase(),
@@ -607,13 +624,13 @@ async function loadDashboard() {
     document.getElementById('app').classList.add('visible');
     applyFilters();
   } catch(e) {
-    document.getElementById('loading-text').textContent = 'Erro ao carregar dados. URL de transações configurada?';
-    console.error(e);
+    console.error('Load error:', e);
+    document.getElementById('loading-text').innerHTML = 'Erro ao carregar.<br>Verifique a planilha e tente novamente.<br><small style="color:#4a6080;margin-top:8px">URL: ' + SOFIA_CONFIG.transacoes_url.slice(0,60) + '...</small>';
     setTimeout(()=>{
       document.getElementById('data-loading').style.display='none';
       document.getElementById('login-screen').style.display='flex';
       document.getElementById('btn-login').disabled=false;
-    }, 3000);
+    }, 4000);
   }
 }
 
@@ -628,11 +645,11 @@ async function refreshData() {
 function setupUI() {
   document.getElementById('sb-nome').textContent = SESSION.nome;
   document.getElementById('sb-role').textContent = SESSION.perfil.toUpperCase();
-  document.getElementById('cfg-usuarios').textContent = SOFIA_CONFIG.usuarios_url.slice(0,40)+'...';
-  document.getElementById('cfg-transacoes').textContent = SOFIA_CONFIG.transacoes_url.slice(0,40)+'...';
+  document.getElementById('cfg-usuarios').textContent = SOFIA_CONFIG.usuarios_url;
+  document.getElementById('cfg-transacoes').textContent = SOFIA_CONFIG.transacoes_url;
   document.getElementById('cfg-login').textContent = SESSION.usuario;
   document.getElementById('cfg-perfil').textContent = SESSION.perfil;
-  document.getElementById('cfg-count').textContent = ALL_DATA.length;
+  document.getElementById('cfg-count').textContent = ALL_DATA.length + ' registros';
 }
 
 function populateFilters() {
@@ -766,8 +783,8 @@ function renderAnalise() {
   // ranking categoria (horizontal bar)
   const byCat = groupBy(FILTERED,'categoria');
   const catE = Object.entries(byCat).sort((a,b)=>b[1]-a[1]);
-  if(document.getElementById('ch-cat-rank')&&CHARTS['ch-cat-rank']) CHARTS['ch-cat-rank'].destroy();
   if(document.getElementById('ch-cat-rank')){
+    if(CHARTS['ch-cat-rank']) CHARTS['ch-cat-rank'].destroy();
     CHARTS['ch-cat-rank'] = new Chart(document.getElementById('ch-cat-rank'),{
       type:'bar',
       data:{labels:catE.map(([k])=>k),datasets:[{data:catE.map(([,v])=>v),backgroundColor:C_PALETTE,borderRadius:4,borderSkipped:false}]},
