@@ -1,0 +1,708 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RavenScope — Mapa de Calor da Casa</title>
+<style>
+:root{
+  --bg:#05070d; --text:#f4f7fb; --dim:rgba(244,247,251,.58); --faint:rgba(244,247,251,.36);
+  --glass:rgba(255,255,255,.055); --glass-strong:rgba(255,255,255,.085);
+  --stroke:rgba(255,255,255,.14); --stroke-hi:rgba(255,255,255,.30);
+  --teal:#2fe3cf; --blue:#6aa8ff; --indigo:#8a7dff; --amber:#ffc24a; --crit:#ff6b85;
+  --ui:-apple-system,BlinkMacSystemFont,"SF Pro Display","Helvetica Neue",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Monaco,Consolas,monospace; --r:20px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--bg); color:var(--text); font-family:var(--ui);
+  -webkit-font-smoothing:antialiased; overflow-x:hidden}
+.glass{background:var(--glass); backdrop-filter:blur(34px) saturate(160%);
+  border:1px solid var(--stroke); border-radius:var(--r);
+  box-shadow:0 10px 40px rgba(0,0,0,.38), inset 0 1px 0 var(--stroke-hi)}
+.wrap{max-width:1400px; margin:0 auto; padding:20px}
+
+.bar{display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding:14px 20px; margin-bottom:16px}
+.brand{display:flex; align-items:baseline; gap:10px}
+.brand h1{font-size:19px; font-weight:600; margin:0}
+.brand h1 .scope{color:var(--teal)}
+.brand .tag{font-family:var(--mono); font-size:10px; color:var(--faint);
+  text-transform:uppercase; letter-spacing:2px}
+.spacer{flex:1}
+.live{display:flex; align-items:center; gap:8px; font-family:var(--mono);
+  font-size:11px; color:var(--dim); text-transform:uppercase; letter-spacing:1.5px}
+.led{width:8px; height:8px; border-radius:50%; background:var(--teal); animation:beat 2.4s infinite}
+.led.off{background:var(--crit); box-shadow:none; animation:none}
+@keyframes beat{0%{box-shadow:0 0 0 0 rgba(47,227,207,.55)}70%{box-shadow:0 0 0 7px rgba(47,227,207,0)}100%{box-shadow:0 0 0 0 rgba(47,227,207,0)}}
+.meta{font-family:var(--mono); font-size:11px; color:var(--dim); text-align:right; line-height:1.6}
+.meta b{color:var(--text); font-weight:500}
+
+.toolbar{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+.btn{font:600 12.5px var(--ui); color:var(--text); background:rgba(255,255,255,.06);
+  border:1px solid var(--stroke); border-radius:10px; padding:8px 13px; cursor:pointer; transition:all .2s}
+.btn:hover{background:rgba(255,255,255,.12); border-color:var(--stroke-hi)}
+.btn.primary{background:rgba(47,227,207,.16); border-color:rgba(47,227,207,.5); color:var(--teal)}
+.btn.primary:hover{background:rgba(47,227,207,.26)}
+.btn.on{background:rgba(106,168,255,.2); border-color:rgba(106,168,255,.55)}
+.seg{display:inline-flex; border:1px solid var(--stroke); border-radius:10px; overflow:hidden}
+.seg button{font:600 12px var(--ui); background:transparent; color:var(--dim); border:0;
+  padding:8px 14px; cursor:pointer; border-right:1px solid var(--stroke)}
+.seg button:last-child{border-right:0}
+.seg button.on{background:rgba(47,227,207,.18); color:var(--teal)}
+
+.main{display:grid; grid-template-columns:1fr 290px; gap:16px; align-items:start}
+@media(max-width:960px){ .main{grid-template-columns:1fr} }
+.mapcard{position:relative; padding:14px}
+.mapwrap{position:relative; width:100%; overflow:hidden; border-radius:14px;
+  border:1px solid var(--stroke); background:
+  radial-gradient(circle at 50% 38%, rgba(255,255,255,.05), rgba(255,255,255,.01) 70%)}
+canvas#map{display:block; width:100%; height:520px; touch-action:none; cursor:crosshair}
+.hint{position:absolute; left:14px; bottom:12px; z-index:3; font-family:var(--mono);
+  font-size:11px; color:var(--faint); background:rgba(5,7,13,.7); padding:6px 10px; border-radius:9px;
+  border:1px solid var(--stroke); pointer-events:none}
+.scale-ruler{position:absolute; right:14px; top:12px; z-index:3; font-family:var(--mono);
+  font-size:10.5px; color:var(--faint); background:rgba(5,7,13,.7); padding:6px 10px; border-radius:9px;
+  border:1px solid var(--stroke)}
+.legend{display:flex; align-items:center; gap:8px; margin-top:12px; font-family:var(--mono); font-size:10.5px; color:var(--faint)}
+.legend .grad{height:10px; flex:1; border-radius:99px;
+  background:linear-gradient(90deg,#0a1f3a,#1f6feb,#2fe3cf,#ffc24a,#ff5a5f); border:1px solid var(--stroke)}
+.legend b{color:var(--dim); font-weight:500}
+
+.side{display:grid; gap:14px}
+.card{padding:16px 18px}
+.eyebrow{font-size:10px; letter-spacing:2.2px; text-transform:uppercase; color:var(--faint);
+  margin:0 0 12px; font-weight:600; display:flex; justify-content:space-between; align-items:center}
+.eyebrow .u{font-family:var(--mono); letter-spacing:1px; color:var(--dim); text-transform:none; font-weight:400}
+.field{margin-bottom:12px}
+.field label{display:block; font-size:11px; color:var(--dim); margin-bottom:5px; letter-spacing:.4px}
+.field input,.field select{width:100%; font:12.5px var(--mono); color:var(--text);
+  background:rgba(255,255,255,.05); border:1px solid var(--stroke); border-radius:9px; padding:8px 10px}
+.field input:focus,.field select:focus{outline:none; border-color:var(--teal)}
+.field .row{display:flex; gap:8px}
+.field .row input{flex:1}
+.hintdim{font-size:10.5px; color:var(--faint); margin-top:4px}
+.warn{margin:-6px 0 12px; padding:9px 11px; border-radius:9px; font-size:11px; line-height:1.5;
+  background:rgba(255,107,133,.1); border:1px solid rgba(255,107,133,.45); color:#ff9eb0}
+.warn b{color:#ffc6d0}
+.warn button{margin-top:7px; font:600 11px var(--ui); color:#ffd7de; background:rgba(255,107,133,.18);
+  border:1px solid rgba(255,107,133,.55); border-radius:8px; padding:5px 10px; cursor:pointer}
+.warn button:hover{background:rgba(255,107,133,.3)}
+
+.list{display:grid; gap:8px; max-height:250px; overflow:auto}
+.item{display:flex; align-items:center; gap:10px; padding:9px 11px; border-radius:12px;
+  background:rgba(255,255,255,.04); border:1px solid var(--stroke); cursor:pointer; transition:all .2s}
+.item:hover{background:rgba(255,255,255,.08)}
+.item.sel{background:rgba(47,227,207,.13); border-color:rgba(47,227,207,.5)}
+.item .sw{width:12px; height:12px; border-radius:4px; flex:none}
+.item .nm{font-size:12.5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.item .nm small{display:block; font-family:var(--mono); color:var(--faint); font-size:10px}
+.item .val{font-family:var(--mono); font-size:11px; color:var(--dim); margin-left:auto; white-space:nowrap}
+.item .del{background:none; border:0; color:var(--faint); font-size:14px; cursor:pointer; padding:2px 5px; border-radius:6px}
+.item .del:hover{color:var(--crit); background:rgba(255,107,133,.12)}
+.empty{color:var(--faint); font-size:12px; text-align:center; padding:12px 0}
+.ev{display:grid; grid-template-columns:62px 72px 1fr; gap:8px; align-items:baseline;
+  font-family:var(--mono); font-size:10.5px; padding:5px 0; border-bottom:1px solid rgba(255,255,255,.06)}
+.ev .t{color:var(--faint)} .ev .k{font-weight:600}
+.ev.anomaly .k{color:var(--crit)} .ev.state .k{color:var(--blue)} .ev .d{color:var(--dim)}
+.foot{color:var(--faint); font-size:11px; line-height:1.6; margin-top:14px}
+::-webkit-scrollbar{width:8px} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14); border-radius:99px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="bar glass">
+    <div class="brand"><h1>Raven<span class="scope">Scope</span></h1>
+      <span class="tag">mapa de calor · casa</span></div>
+    <div class="spacer"></div>
+    <div class="live"><span class="led" id="led"></span><span id="live-txt">conectando…</span></div>
+    <div class="meta"><div>estado <b id="m-state">—</b> · energia <b id="m-energy">—</b></div>
+      <div>iluminadores <b id="m-links">0</b> · <b id="m-any" style="color:var(--teal)">—</b></div></div>
+  </div>
+
+  <div class="bar glass" style="padding:10px 16px">
+    <div class="toolbar">
+      <div class="seg" id="modeSeg">
+        <button id="modeEdit" class="on">✏️ Editar</button>
+        <button id="modeView">👁 Ver</button>
+      </div>
+      <button class="btn primary" id="btnRoom">＋ Cômodo</button>
+      <button class="btn primary" id="btnAp">＋ Sensor (AP)</button>
+      <button class="btn" id="btnSave">💾 Salvar</button>
+      <button class="btn" id="btnExport">📤 Exportar</button>
+      <button class="btn" id="btnImport">📥 Importar</button>
+      <button class="btn" id="btnClear">🗑 Limpar</button>
+    </div>
+  </div>
+
+  <div class="main">
+    <div class="mapcard glass">
+      <div class="mapwrap">
+        <canvas id="map"></canvas>
+        <div class="hint" id="hint">Modo edição — clique/arraste no mapa</div>
+        <div class="scale-ruler" id="ruler">—</div>
+      </div>
+      <div class="legend"><span>parado</span><div class="grad"></div><span>ativo</span>
+        <b id="scale-lbl" style="margin-left:8px">—</b></div>
+      <div class="legend" style="flex-wrap:wrap">
+        <span>🟢 ponto = seu AP</span><span style="color:var(--faint)">·</span>
+        <span style="color:rgba(244,247,251,.55)">◌ tracejado EXT = AP de vizinho (borda)</span>
+        <span style="color:var(--faint)">·</span><span>calor = movimento entre o PC e aquele AP</span>
+        <span style="color:var(--faint)">·</span><span style="color:#2fe3cf">✦ rastro = onde andou (some em ~40s)</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="card glass">
+        <div class="eyebrow">Propriedades <span class="u">objeto selecionado</span></div>
+        <div id="props"><div class="empty">Clique em um cômodo ou sensor no mapa</div></div>
+      </div>
+
+      <div class="card glass">
+        <div class="eyebrow">Cômodos <span class="u" id="room-count">0</span></div>
+        <div class="list" id="roomList"><div class="empty">Nenhum cômodo ainda</div></div>
+      </div>
+
+      <div class="card glass">
+        <div class="eyebrow">Sensores (AP) <span class="u" id="ap-count">0</span></div>
+        <div class="list" id="apList"><div class="empty">Adicione sensores e associe ao SSID detectado</div></div>
+      </div>
+
+      <div class="card glass">
+        <div class="eyebrow">Atividade recente</div>
+        <div id="events"><div class="empty">—</div></div>
+        <div class="foot">Os sensores são os pontos do mapa. O calor é a energia de movimento
+          detectada em cada AP — quando alguém se move entre o PC e aquele roteador, o ponto
+          acende. Com 1 roteador (2 frequências) o mapa é grosseiro; mais roteadores = mais pontos.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const PXM = 30;                     // pixels por metro base (casa)
+let pxPerMeter = PXM;
+let rooms = [], aps = [], selected = null, selType = null;
+let mode = 'edit';
+let lastSnap = null;
+let drawing = null;                 // {x0,y0} durante desenho de cômodo
+let trail = [];                     // rastro de movimento {x,y,t,e}
+
+const roomColors = ['#6aa8ff','#2fe3cf','#8a7dff','#ffc24a','#ff6b85','#4ade80','#f472b6','#38bdf8'];
+
+function uid(){ return 'o' + Math.random().toString(36).slice(2,9); }
+function heatColor(v){
+  const stops = [[0,[10,31,58]],[0.25,[31,111,235]],[0.5,[47,227,207]],
+                 [0.75,[255,194,74]],[1,[255,90,95]]];
+  const c = Math.max(0,Math.min(1,v));
+  for(let i=0;i<stops.length-1;i++){
+    const [t1,c1]=stops[i],[t2,c2]=stops[i+1];
+    if(c>=t1 && c<=t2){ const f=(c-t1)/(t2-t1||1);
+      return [c1[0]+(c2[0]-c1[0])*f, c1[1]+(c2[1]-c1[1])*f, c1[2]+(c2[2]-c1[2])*f]; }
+  }
+  return stops[stops.length-1][1];
+}
+
+/* ---------- canvas setup ---------- */
+const canvas = $('#map'), ctx = canvas.getContext('2d');
+function sizeMap(){
+  const r = canvas.parentElement.getBoundingClientRect();
+  const dpr = window.devicePixelRatio||1;
+  canvas.width = r.width*dpr; canvas.height = r.height*dpr;
+  canvas.style.width = r.width+'px'; canvas.style.height = r.height+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  $('#ruler').textContent = pxPerMeter + ' px = 1 m';
+}
+addEventListener('resize', ()=>{ sizeMap(); draw(); });
+
+function toMap(e){
+  const r = canvas.getBoundingClientRect();
+  return { x:e.clientX-r.left, y:e.clientY-r.top };
+}
+
+/* ---------- drawing ---------- */
+function draw(){
+  const w = canvas.width/ (window.devicePixelRatio||1);
+  const h = canvas.height/ (window.devicePixelRatio||1);
+  ctx.clearRect(0,0,w,h);
+
+  // grid (1 m)
+  ctx.strokeStyle='rgba(255,255,255,.045)'; ctx.lineWidth=1; ctx.beginPath();
+  for(let gx=pxPerMeter; gx<w; gx+=pxPerMeter){ ctx.moveTo(gx,0); ctx.lineTo(gx,h); }
+  for(let gy=pxPerMeter; gy<h; gy+=pxPerMeter){ ctx.moveTo(0,gy); ctx.lineTo(w,gy); }
+  ctx.stroke();
+
+  // heat field (IDW) behind rooms
+  drawHeat(w,h);
+
+  // rastro de movimento (onde andou, some em ~40 s)
+  if(trail.length){
+    const tn=Date.now();
+    trail.forEach(p=>{
+      const age=(tn-p.t)/40000;
+      const al=0.5*(1-age);
+      if(al<=0.01) return;
+      const c=heatColor(Math.min(1,0.35+p.e));
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 3+7*(1-age), 0, 7);
+      ctx.fillStyle=`rgba(${c[0]},${c[1]},${c[2]},${al})`;
+      ctx.fill();
+    });
+  }
+
+  // rooms
+  rooms.forEach(rm=>{
+    const x=rm.x, y=rm.y, rw=rm.w*pxPerMeter, rh=rm.h*pxPerMeter;
+    ctx.fillStyle = rm.bg||'rgba(106,168,255,.10)';
+    ctx.strokeStyle = selected===rm? '#2fe3cf' : 'rgba(255,255,255,.30)';
+    ctx.lineWidth = selected===rm? 2.2 : 1.4;
+    ctx.beginPath(); ctx.roundRect(x,y,rw,rh,6); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = rm.txt||'#eaf2ff'; ctx.font='600 12px var(--ui), system-ui';
+    ctx.textAlign='left'; ctx.textBaseline='top';
+    ctx.fillText(rm.name, x+8, y+8);
+    ctx.font='10px ui-monospace, Menlo, monospace'; ctx.fillStyle='rgba(234,242,255,.65)';
+    ctx.fillText(rm.w.toFixed(1)+' × '+rm.h.toFixed(1)+' m', x+8, y+24);
+    if(mode==='edit' && selected===rm){
+      ctx.strokeStyle='rgba(47,227,207,.6)'; ctx.lineWidth=1.6;
+      ctx.strokeRect(x+rw-3, y+rh-3, 6, 6);
+    }
+  });
+
+  // AP sensors
+  aps.forEach(ap=>{
+    const p = apPos(ap);
+    const viz = ap.tipo==='vizinho';
+    const R = viz? 9 : 12;
+    const e = Math.max(apEnergy(ap)||0, ap.glow||0);   // energia com rastro
+    const c = heatColor(e);
+    if(viz){
+      ctx.strokeStyle='rgba(255,255,255,.25)'; ctx.lineWidth=1.4; ctx.setLineDash([4,3]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, R+4, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle='rgba(255,255,255,.18)';
+      ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, 7); ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,.6)'; ctx.lineWidth=1.3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, 7); ctx.stroke();
+      if(e>0.05){
+        ctx.strokeStyle=`rgba(${c[0]},${c[1]},${c[2]},${0.35+0.5*e})`; ctx.lineWidth=2.2;
+        ctx.beginPath(); ctx.arc(p.x, p.y, R+4+e*10, 0, 7); ctx.stroke();
+      }
+      ctx.fillStyle='rgba(244,247,251,.55)';
+      ctx.font='8px ui-monospace, Menlo, monospace'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText('EXT', p.x, p.y+0.5);
+      ctx.textAlign='left'; ctx.textBaseline='bottom';
+      ctx.fillStyle='rgba(255,255,255,.55)';
+      ctx.font='10px ui-monospace, Menlo, monospace';
+      ctx.fillText((ap.label||'(sem AP)')+' · ext', p.x-R-6, p.y-R-6);
+    } else {
+      ctx.beginPath(); ctx.arc(p.x, p.y, R+4+e*22, 0, 7);
+      ctx.fillStyle = `rgba(${c[0]},${c[1]},${c[2]},${0.18+0.4*e})`;
+      if(!reduce) ctx.shadowColor=`rgb(${c[0]},${c[1]},${c[2]})`;
+      if(!reduce) ctx.shadowBlur = 4+e*26;
+      ctx.fill(); ctx.shadowBlur=0;
+      ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, 7);
+      ctx.fillStyle = ap.active
+        ? (e>0.05? `rgb(${c[0]},${c[1]},${c[2]})` : 'rgba(47,227,207,.95)')
+        : 'rgba(255,255,255,.75)';
+      ctx.fill();
+      if(ap.active){   // sempre visível enquanto detectado
+        ctx.strokeStyle= e>0.05? `rgba(${c[0]},${c[1]},${c[2]},.95)` : 'rgba(47,227,207,.75)';
+        ctx.lineWidth=2.2;
+        ctx.beginPath(); ctx.arc(p.x, p.y, R+3+e*4, 0, 7); ctx.stroke();
+      }
+      ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=1.6;
+      ctx.beginPath(); ctx.arc(p.x, p.y, R, 0, 7); ctx.stroke();
+      ctx.fillStyle='#06121f'; ctx.font='600 9px ui-monospace, Menlo, monospace';
+      ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(ap.label? ap.label.slice(0,4):'?', p.x, p.y+0.5);
+      ctx.textAlign='left'; ctx.textBaseline='bottom';
+      ctx.fillStyle='rgba(255,255,255,.9)';
+      ctx.font='10px ui-monospace, Menlo, monospace';
+      ctx.fillText((ap.label||'(sem AP)')+(ap.freq2?' · 2.4+5G':''), p.x-R, p.y-R-4);
+      if(apData(ap)){
+        const en=apEnergy(ap)||0;
+        ctx.font='9px ui-monospace, Menlo, monospace'; ctx.fillStyle= en>0.05? `rgba(${c[0]},${c[1]},${c[2]},.95)` : 'rgba(255,255,255,.6)';
+        ctx.fillText('E '+en.toFixed(2)+' · '+(apData(ap).rssi|0)+'dBm', p.x-R, p.y-R-4+12);
+      } else {
+        ctx.fillStyle='rgba(255,133,150,.9)'; ctx.font='9px ui-monospace, Menlo, monospace';
+        ctx.fillText('sem AP — selecione e associe', p.x-R, p.y-R-4+12);
+      }
+    }
+    if(mode==='edit' && selected===ap){
+      ctx.strokeStyle='rgba(47,227,207,.7)'; ctx.lineWidth=1.6; ctx.setLineDash([4,3]);
+      ctx.beginPath(); ctx.arc(p.x, p.y, R+8, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+    }
+  });
+
+  // drawing new room
+  if(drawing){
+    ctx.fillStyle='rgba(106,168,255,.14)'; ctx.strokeStyle='rgba(106,168,255,.7)'; ctx.lineWidth=1.6;
+    ctx.beginPath(); ctx.roundRect(drawing.x0, drawing.y0,
+      drawing.x-drawing.x0, drawing.y-drawing.y0, 6); ctx.fill(); ctx.stroke();
+  }
+}
+
+function drawHeat(w,h){
+  const pts = aps.filter(a=>a.bssid && a.active && a.tipo!=='vizinho').map(a=>({
+    x:a.x, y:a.y, e:Math.max(0,Math.min(1,a.glow||0))
+  }));
+  if(pts.length===0) return;
+  const idw = new ImageData(w, h);
+  const d = idw.data;
+  const Rmax = pxPerMeter*3.0;
+  const step = 2; // sample every 2px for speed, then fill 2x2
+  for(let y=0; y<h; y+=step){
+    for(let x=0; x<w; x+=step){
+      let num=0, den=0, fallMax=0;
+      for(const p of pts){
+        const dx=x-p.x, dy=y-p.y;
+        const dist2=dx*dx+dy*dy;
+        if(dist2 < 1){ num+=p.e*1000; den+=1000; fallMax=1; continue; }
+        const d2 = Math.max(dist2, 1);
+        const fall = Math.exp(-d2/(2*Rmax*Rmax));
+        if(fall>fallMax) fallMax=fall;
+        const wi = fall/Math.sqrt(d2);
+        num += p.e*wi; den += wi;
+      }
+      if(den<=0 || fallMax<0.05) continue;   // longe demais de todo sensor → fundo escuro
+      let v = den>0 ? num/den : 0;
+      v = Math.max(0, Math.min(1, v*1.9));
+      const c = heatColor(v);
+      const al = (0.30 + 0.62*v) * Math.min(1, fallMax*1.8);
+      for(let dy=0; dy<step && y+dy<h; dy++){
+        for(let dx=0; dx<step && x+dx<w; dx++){
+          const i = ((y+dy)*w + (x+dx))*4;
+          d[i]=c[0]; d[i+1]=c[1]; d[i+2]=c[2];
+          d[i+3]=Math.round(al*255);
+        }
+      }
+    }
+  }
+  // putImageData ignores the DPR transform, so stamp onto an offscreen canvas
+  // at CSS resolution and drawImage (transform-scaled) onto the main canvas.
+  const off = document.createElement('canvas');
+  off.width = w; off.height = h;
+  const octx = off.getContext('2d');
+  octx.putImageData(idw,0,0);
+  ctx.drawImage(off, 0, 0, w, h);
+}
+function apEnergies(ap){
+  if(!lastSnap) return [];
+  const ls=lastSnap.links||[];
+  const res=[];
+  if(ap.bssid){ const l=ls.find(x=>x.bssid===ap.bssid); if(l) res.push(l); }
+  if(ap.freq2){ const l=ls.find(x=>x.bssid===ap.freq2); if(l) res.push(l); }
+  return res;
+}
+function apEnergy(ap){
+  const ls=apEnergies(ap);
+  if(!ls.length) return 0;
+  return Math.max(...ls.map(l=>l.energy||0));
+}
+function apData(ap){
+  return apEnergies(ap)[0] || null;
+}
+function apRssi(ap){
+  const ls=apEnergies(ap);
+  return ls.length? Math.max(...ls.map(l=>l.rssi||-100)) : 0;
+}
+
+// Position used for drawing/hit: "vizinho" sensors are pinned to the map
+// border along the direction of their stored (x,y), so the user points the
+// marker at the neighbor without letting external heat pollute the rooms.
+function apPos(ap){
+  if(ap.tipo!=='vizinho') return {x:ap.x, y:ap.y};
+  const w = canvas.width/(window.devicePixelRatio||1);
+  const h = canvas.height/(window.devicePixelRatio||1);
+  const cx=w/2, cy=h/2, m=8;
+  let dx=ap.x-cx, dy=ap.y-cy;
+  if(!dx && !dy){ dx=1; dy=0; }
+  const sx=Math.abs(dx)||1e-9, sy=Math.abs(dy)||1e-9;
+  const t=Math.min((w/2-m)/sx, (h/2-m)/sy);
+  return {x:cx+dx*t, y:cy+dy*t};
+}
+
+/* ---------- editor interactions ---------- */
+let drag = null; // {type, obj, offX, offY, resizing}
+
+function hit(x,y){
+  for(let i=aps.length-1;i>=0;i--){
+    const a=aps[i], p=apPos(a); if(Math.hypot(x-p.x,y-p.y)<=18) return {type:'ap', obj:a};
+  }
+  for(let i=rooms.length-1;i>=0;i--){
+    const r=rooms[i];
+    const rw=r.w*pxPerMeter, rh=r.h*pxPerMeter;
+    if(x>=r.x && x<=r.x+rw && y>=r.y && y<=r.y+rh) return {type:'room', obj:r};
+  }
+  return null;
+}
+
+canvas.addEventListener('mousedown', e=>{
+  if(mode!=='edit') return;
+  const p = toMap(e);
+  if(e.shiftKey || drawing){
+    e.preventDefault();
+    drawing = {x0:p.x, y0:p.y, x:p.x, y:p.y};
+    return;
+  }
+  const h = hit(p.x,p.y);
+  if(h){
+    selected = h.obj; selType = h.type;
+    if(h.type==='ap'){ drag={type:'ap', obj:h.obj, offX:p.x-h.obj.x, offY:p.y-h.obj.y}; }
+    else {
+      const r=h.obj; const rw=r.w*pxPerMeter, rh=r.h*pxPerMeter;
+      const corner = Math.hypot(p.x-(r.x+rw), p.y-(r.y+rh))<=10;
+      if(corner){ drag={type:'resize', obj:r}; }
+      else drag={type:'room', obj:r, offX:p.x-r.x, offY:p.y-r.y};
+    }
+  } else { selected=null; selType=null; }
+  renderProps(); renderLists(); draw();
+});
+
+canvas.addEventListener('mousemove', e=>{
+  const p = toMap(e);
+  if(drawing){ drawing.x=p.x; drawing.y=p.y; draw(); return; }
+  if(drag){
+    if(drag.type==='ap'){ drag.obj.x=p.x-drag.offX; drag.obj.y=p.y-drag.offY; }
+    else if(drag.type==='room'){ drag.obj.x=p.x-drag.offX; drag.obj.y=p.y-drag.offY; }
+    else if(drag.type==='resize'){
+      const r=drag.obj; r.w=Math.max(0.4,(p.x-r.x)/pxPerMeter);
+      r.h=Math.max(0.4,(p.y-r.y)/pxPerMeter);
+    }
+    draw(); renderProps();
+  }
+});
+
+function onMouseUp(e){
+  if(drawing && drawing.x0!==drawing.x && drawing.y0!==drawing.y){
+    const w=Math.abs(drawing.x-drawing.x0), hh=Math.abs(drawing.y-drawing.y0);
+    const rm={ id:uid(), name:'Cômodo', x:Math.min(drawing.x0,drawing.x),
+      y:Math.min(drawing.y0,drawing.y), w:Math.max(0.4,w/pxPerMeter), h:Math.max(0.4,hh/pxPerMeter),
+      color:roomColors[rooms.length%roomColors.length] };
+    rooms.push(rm); selected=rm; selType='room';
+    drawing=null; renderProps(); renderLists();
+  } else { drawing=null; }
+  drag=null; draw();
+}
+addEventListener('mouseup', e=>onMouseUp(e));
+
+canvas.addEventListener('dblclick', e=>{
+  if(mode!=='edit') return;
+  const p=toMap(e); const h=hit(p.x,p.y);
+  if(h){ selected=h.obj; selType=h.type; renderProps(); }
+});
+
+/* touch support */
+canvas.addEventListener('touchstart', e=>{
+  const t=e.touches[0]; e.preventDefault();
+  const fake={clientX:t.clientX, clientY:t.clientY, preventDefault(){}};
+  canvas.dispatchEvent(new MouseEvent('mousedown', {clientX:t.clientX, clientY:t.clientY}));
+}, {passive:false});
+canvas.addEventListener('touchmove', e=>{
+  const t=e.touches[0]; e.preventDefault();
+  canvas.dispatchEvent(new MouseEvent('mousemove', {clientX:t.clientX, clientY:t.clientY}));
+}, {passive:false});
+canvas.addEventListener('touchend', e=>{ e.preventDefault(); onMouseUp(); }, {passive:false});
+
+/* ---------- toolbar ---------- */
+$('#modeEdit').onclick=()=>{ mode='edit'; setSeg('modeEdit'); $('#hint').textContent='Modo edição — clique/arraste; Shift+arraste desenha cômodo'; draw(); };
+$('#modeView').onclick=()=>{ mode='view'; setSeg('modeView'); $('#hint').textContent='Modo visualização — calor ao vivo'; drag=null; draw(); };
+function setSeg(id){ $('#modeEdit').classList.toggle('on', id==='modeEdit');
+  $('#modeView').classList.toggle('on', id==='modeView'); }
+
+$('#btnRoom').onclick=()=>{
+  if(mode!=='edit'){ $('#modeEdit').click(); }
+  drawing={x0:120,y0:90,x:260,y:170};
+  $('#hint').textContent='Arraste no mapa para dimensionar o cômodo (Shift também desenha)';
+};
+$('#btnAp').onclick=()=>{
+  const ap={ id:uid(), label:'(sem AP)', bssid:'', tipo:'proprio', glow:0, x:140+aps.length*14, y:110+aps.length*9 };
+  aps.push(ap); selected=ap; selType='ap'; draw(); renderProps(); renderLists();
+};
+$('#btnSave').onclick=()=>{ saveLayout(); flash('Salvo ✓'); };
+$('#btnExport').onclick=()=>{ exportLayout(); };
+$('#btnImport').onclick=()=>{ importLayout(); };
+$('#btnClear').onclick=()=>{
+  if(confirm('Limpar mapa (cômodos e sensores)?')){ rooms=[]; aps=[]; selected=null; selType=null;
+    draw(); renderProps(); renderLists(); }
+};
+
+/* ---------- properties panel ---------- */
+function renderProps(){
+  const box=$('#props');
+  if(!selected){ box.innerHTML='<div class="empty">Clique em um cômodo ou sensor no mapa</div>'; return; }
+  if(selType==='room'){
+    const r=selected;
+    box.innerHTML=`
+      <div class="field"><label>Nome do cômodo</label>
+        <input id="pName" value="${esc(r.name)}"></div>
+      <div class="field"><label>Dimensões reais (metros)</label>
+        <div class="row"><input id="pW" type="number" step="0.1" min="0.4" value="${r.w}">
+        <input id="pH" type="number" step="0.1" min="0.4" value="${r.h}"></div>
+        <div class="hintdim">Comprimento × Largura do cômodo real</div></div>
+      <div class="field"><label>Cor</label>
+        <div class="row">${roomColors.map(c=>`<button class="sw" data-c="${c}" style="background:${c};width:26px;height:26px;border:0;border-radius:7px;cursor:pointer;${r.color===c?'outline:2px solid #fff':''}"></button>`).join('')}</div></div>`;
+    $('#pName').oninput=e=>{ r.name=e.target.value; draw(); renderLists(); };
+    $('#pW').oninput=e=>{ r.w=Math.max(0.4,parseFloat(e.target.value)||0.4); draw(); };
+    $('#pH').oninput=e=>{ r.h=Math.max(0.4,parseFloat(e.target.value)||0.4); draw(); };
+    box.querySelectorAll('.sw').forEach(b=>b.onclick=()=>{ r.color=b.dataset.c; renderProps(); draw(); });
+  } else {
+    const ap=selected;
+    const links=(lastSnap&&lastSnap.links||[]);
+    const optFor=l=>`<option value="${l.bssid}" ${l.bssid===ap.bssid?'selected':''}>${esc(l.ssid||l.bssid)} · ${l.rssi}dBm</option>`;
+    const own=links.filter(l=>/juraci/i.test(l.ssid||''));
+    const ext=links.filter(l=>!/juraci/i.test(l.ssid||''));
+    const opts=(own.length?`<optgroup label="Seus roteadores (JURACI)">${own.map(optFor).join('')}</optgroup>`:'')
+      +(ext.length?`<optgroup label="Outras redes detectadas (vizinhos)">${ext.map(optFor).join('')}</optgroup>`:'');
+    const cur=ap.bssid?links.find(x=>x.bssid===ap.bssid):null;
+    const warn = cur && ap.tipo!=='vizinho' && !/juraci/i.test(cur.ssid||'');
+    const f2=links.filter(x=>x.bssid!==ap.bssid && x.bssid!==ap.freq2);
+    const optFor2=l=>`<option value="${l.bssid}" ${l.bssid===ap.freq2?'selected':''}>${esc(l.ssid||l.bssid)} · ${l.rssi}dBm</option>`;
+    const own2=f2.filter(l=>/juraci/i.test(l.ssid||''));
+    const ext2=f2.filter(l=>!/juraci/i.test(l.ssid||''));
+    const opts2=(own2.length?`<optgroup label="Seus roteadores (JURACI)">${own2.map(optFor2).join('')}</optgroup>`:'')
+      +(ext2.length?`<optgroup label="Outras redes detectadas (vizinhos)">${ext2.map(optFor2).join('')}</optgroup>`:'');
+    box.innerHTML=`
+      <div class="field"><label>Nome</label><input id="pLabel" value="${esc(ap.label)}"></div>
+      <div class="field"><label>Tipo de sensor</label>
+        <select id="pTipo">
+          <option value="proprio" ${ap.tipo!=='vizinho'?'selected':''}>Próprio (dentro da minha casa)</option>
+          <option value="vizinho" ${ap.tipo==='vizinho'?'selected':''}>Vizinho (exterior — borda do mapa)</option>
+        </select></div>
+      <div class="field"><label>Associar ao sensor detectado (SSID)</label>
+        <select id="pBssid"><option value="">— nenhum —</option>${opts}</select>
+        ${warn?`<div class="warn">⚠ "${esc(cur.ssid)}" não parece ser o SEU roteador (JURACI). Se for rede de vizinho, use o tipo <b>Vizinho</b> para o calor dele não poluir o mapa.
+          <button id="btnViz">Marcar como Vizinho</button></div>`:''}</div>
+      <div class="field"><label>2ª frequência do MESMO roteador (2.4G ↔ 5G)</label>
+        <select id="pFreq2"><option value="">— nenhum —</option>${opts2}</select>
+        <div class="hintdim">JURACI 2.4G e 5G são o <b>mesmo aparelho</b> em 2 frequências. Associe os dois aqui: vira UM único sensor (o mapa usa a leitura mais forte).</div></div>
+      <div class="field"><label>Posição no mapa (px)</label>
+        <div class="row"><input id="pX" type="number" value="${Math.round(ap.x)}">
+        <input id="pY" type="number" value="${Math.round(ap.y)}"></div>
+        <div class="hintdim">${ap.tipo==='vizinho'?'Arraste o ponto na direção do vizinho — o marcador fica preso na borda.':'Posição em pixels do sensor no mapa.'}</div></div>
+      <div class="field"><label>Energia atual</label>
+        <div class="hintdim" style="font-size:13px;color:var(--teal)">${(apEnergy(ap)||0).toFixed(3)}</div></div>`;
+    $('#pLabel').oninput=e=>{ ap.label=e.target.value; draw(); renderLists(); };
+    $('#pTipo').onchange=e=>{ ap.tipo=e.target.value; draw(); renderProps(); renderLists(); };
+    $('#pBssid').onchange=e=>{ ap.bssid=e.target.value;
+      if(e.target.value){ const l=links.find(x=>x.bssid===e.target.value);
+        if(l) ap.label = l.ssid||ap.label; }
+      renderLists(); draw(); renderProps(); };
+    $('#pFreq2').onchange=e=>{ ap.freq2=e.target.value||null; renderLists(); draw(); renderProps(); };
+    const bv=$('#btnViz'); if(bv) bv.onclick=()=>{ ap.tipo='vizinho'; draw(); renderProps(); renderLists(); };
+    $('#pX').oninput=e=>{ ap.x=parseFloat(e.target.value)||0; draw(); };
+    $('#pY').oninput=e=>{ ap.y=parseFloat(e.target.value)||0; draw(); };
+  }
+}
+
+function esc(s){return (s||'').replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));}
+
+/* ---------- lists ---------- */
+function renderLists(){
+  const rc=$('#room-count'), ac=$('#ap-count');
+  rc.textContent=rooms.length; ac.textContent=aps.length;
+  const rl=$('#roomList'); rl.innerHTML='';
+  if(!rooms.length) rl.innerHTML='<div class="empty">Nenhum cômodo ainda</div>';
+  rooms.forEach(r=>{
+    const d=document.createElement('div'); d.className='item'+(selected===r?' sel':'');
+    d.innerHTML=`<span class="sw" style="background:${r.color}"></span>
+      <span class="nm">${esc(r.name)}<small>${r.w.toFixed(1)} × ${r.h.toFixed(1)} m</small></span>
+      <button class="del" title="remover">✕</button>`;
+    d.onclick=e=>{ if(e.target.classList.contains('del')){ rooms=rooms.filter(x=>x!==r);
+        if(selected===r){selected=null;selType=null;} } else { selected=r; selType='room'; }
+      renderProps(); renderLists(); draw(); };
+    rl.appendChild(d);
+  });
+  const al=$('#apList'); al.innerHTML='';
+  if(!aps.length) al.innerHTML='<div class="empty">Adicione sensores e associe ao SSID detectado</div>';
+  aps.forEach(a=>{
+    const d=document.createElement('div'); d.className='item'+(selected===a?' sel':'');
+    const e=apEnergy(a)||0;
+    d.innerHTML=`<span class="sw" style="background:${a.bssid?`rgb(${heatColor(e).join(',')})`:'#333'}"></span>
+      <span class="nm">${esc(a.label)}<small>${a.bssid? a.bssid:'sem AP'} · ${a.freq2?'2.4+5G · ':''}${a.tipo==='vizinho'?'VIZINHO':'PRÓPRIO'}</small></span>
+      <span class="val">${(e).toFixed(2)}</span>
+      <button class="del" title="remover">✕</button>`;
+    d.onclick=e=>{ if(e.target.classList.contains('del')){ aps=aps.filter(x=>x!==a);
+        if(selected===a){selected=null;selType=null;} } else { selected=a; selType='ap'; }
+      renderProps(); renderLists(); draw(); };
+    al.appendChild(d);
+  });
+}
+
+/* ---------- persistence ---------- */
+const LAYOUT_KEY='ravenscope_map_layout_v1';
+function saveLayout(){ localStorage.setItem(LAYOUT_KEY, JSON.stringify({rooms,aps,pxPerMeter})); }
+function loadLayout(){
+  try{
+    const j=JSON.parse(localStorage.getItem(LAYOUT_KEY));
+    if(j){ rooms=j.rooms||[]; aps=(j.aps||[]).map(a=>({tipo:'proprio',glow:0,...a})); pxPerMeter=j.pxPerMeter||PXM; }
+  }catch(e){}
+}
+function exportLayout(){
+  const blob=new Blob([JSON.stringify({rooms,aps,pxPerMeter},null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+  a.download='mapa-casa.json'; a.click(); URL.revokeObjectURL(a.href);
+}
+function importLayout(){
+  const inp=document.createElement('input'); inp.type='file'; inp.accept='application/json';
+  inp.onchange=()=>{
+    const f=inp.files[0]; if(!f) return;
+    const r=new FileReader();
+    r.onload=()=>{ try{ const j=JSON.parse(r.result);
+      rooms=j.rooms||[]; aps=(j.aps||[]).map(a=>({tipo:'proprio',glow:0,...a})); pxPerMeter=j.pxPerMeter||PXM;
+      selected=null; selType=null; draw(); renderProps(); renderLists(); saveLayout();
+    }catch(e){ alert('Arquivo inválido'); } };
+    r.readAsText(f);
+  };
+  inp.click();
+}
+
+/* ---------- live data ---------- */
+function applySnap(d){
+  lastSnap=d;
+  $('#m-state').textContent=d.state; $('#m-energy').textContent=d.energy.toFixed(3);
+  $('#m-links').textContent=d.n_links;
+  $('#led').classList.toggle('off', !!d.calibrating);
+  $('#live-txt').textContent=d.calibrating? 'calibrando…' : 'ao vivo';
+  let any=false;
+  const now=Date.now();
+  aps.forEach(a=>{ const l=(d.links||[]).find(x=>x.bssid===a.bssid||x.bssid===a.freq2);
+    a.active = !!l;
+    const raw=l?l.energy:0;
+    a.glow = Math.max(raw*1.7, (a.glow||0)*0.84);
+    if(raw>0.05){
+      any=true;
+      if(a.tipo!=='vizinho') trail.push({x:a.x, y:a.y, t:now, e:raw});
+    } });
+  trail = trail.filter(p=>now-p.t<40000).slice(-600);
+  $('#m-any').textContent = any? '⚡ movimento agora' : 'parado';
+  draw(); renderLists();
+  if(renderProps._need) renderProps();
+}
+function addEvent(ev){
+  const box=$('#events'); const row=document.createElement('div');
+  row.className='ev '+ev._event;
+  const t=new Date(ev.ts*1000).toLocaleTimeString();
+  row.innerHTML=`<span class="t">${t}</span><span class="k">${ev._event==='anomaly'?'ANOMALIA':'ESTADO'}</span><span class="d">${esc(ev.detail)}</span>`;
+  box.insertBefore(row, box.firstChild);
+  while(box.children.length>20) box.removeChild(box.lastChild);
+}
+function connect(){
+  const es=new EventSource('/api/stream');
+  es.addEventListener('state', e=>applySnap(JSON.parse(e.data)));
+  es.addEventListener('event', e=>addEvent(JSON.parse(e.data)));
+  es.onerror=()=>{ $('#led').classList.add('off'); $('#live-txt').textContent='reconectando…'; };
+}
+function flash(msg){ const s=$('#hint'); const old=s.textContent; s.textContent=msg;
+  setTimeout(()=>s.textContent=old,1600); }
+
+/* ---------- init ---------- */
+loadLayout(); sizeMap();
+const initialLinks = null;
+renderProps(); renderLists(); draw();
+connect();
+setInterval(()=>{ saveLayout(); }, 30000);
+</script>
+</body>
+</html>
